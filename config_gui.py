@@ -1,29 +1,81 @@
-# config_gui.py
-# -------------------------------------------------------
-# GUI for setting up the master password and initializing
-# the Secure Password Manager databases.
-# -------------------------------------------------------
-
+# config_gui.py (stable version with Qt signals)
 import sys
 import string
 import random
 import threading
+import hashlib
+import mysql.connector
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject
+from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QLabel, QLineEdit, QPushButton,
     QVBoxLayout, QHBoxLayout, QMessageBox, QProgressBar
 )
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont
 
 from utils.setup_utils import setup
-from utils.setup_utils import setup_master_password
+from login_gui import LoginWindow
 
+
+# ---------------- Utility helpers ----------------
 
 def generate_strong_password(length=16):
-    """Generate a strong random password."""
-    chars = string.ascii_letters + string.digits + string.punctuation
+    chars = string.ascii_letters + string.digits + "!@#$%^&*()-_=+[]{};:,.<>?"
     return "".join(random.choice(chars) for _ in range(length))
 
+
+def setup_master_password(password):
+    """Store the master password and device secret in pm_auth."""
+    try:
+        db = mysql.connector.connect(
+            host="localhost",
+            user="pm",
+            password="password",
+            database="pm_auth"
+        )
+        cur = db.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS secrets (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                masterkey_hash VARCHAR(255) NOT NULL,
+                device_secret VARCHAR(255) NOT NULL
+            )
+        """)
+        cur.execute("DELETE FROM secrets")
+
+        master_hash = hashlib.sha256(password.encode()).hexdigest()
+        device_secret = "".join(random.choice(string.ascii_letters + string.digits) for _ in range(32))
+
+        cur.execute(
+            "INSERT INTO secrets (masterkey_hash, device_secret) VALUES (%s, %s)",
+            (master_hash, device_secret)
+        )
+        db.commit()
+        cur.close()
+        db.close()
+    except Exception as e:
+        raise RuntimeError(str(e))
+
+
+# ---------------- Worker with signals ----------------
+
+class SetupWorker(QObject):
+    finished = pyqtSignal(bool, str)
+
+    def __init__(self, password):
+        super().__init__()
+        self.password = password
+
+    def run(self):
+        """Run setup logic in background thread."""
+        try:
+            setup()  # initialize DBs
+            setup_master_password(self.password)
+            self.finished.emit(True, "Master password configured successfully!")
+        except Exception as e:
+            self.finished.emit(False, str(e))
+
+
+# ---------------- GUI Window ----------------
 
 class ConfigWindow(QWidget):
     def __init__(self):
@@ -31,7 +83,6 @@ class ConfigWindow(QWidget):
         self.setWindowTitle("Secure Password Manager - Setup")
         self.setGeometry(500, 250, 450, 350)
         self.setStyleSheet("background-color: #101820; color: #E0E0E0;")
-
         self.init_ui()
 
     def init_ui(self):
@@ -41,7 +92,6 @@ class ConfigWindow(QWidget):
         title.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        # Password fields
         self.password_input = QLineEdit()
         self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.password_input.setPlaceholderText("Enter master password")
@@ -50,27 +100,22 @@ class ConfigWindow(QWidget):
         self.confirm_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.confirm_input.setPlaceholderText("Confirm master password")
 
-        # Show/Hide button
         toggle_btn = QPushButton("👁️ Show")
         toggle_btn.setCheckable(True)
-        toggle_btn.setStyleSheet("background-color: #333; color: white; border-radius: 5px; padding: 4px 8px;")
         toggle_btn.clicked.connect(self.toggle_password_visibility)
+        toggle_btn.setStyleSheet("background-color: #333; color: white; border-radius: 5px; padding: 4px 8px;")
 
-        # Suggest password button
         suggest_btn = QPushButton("🔁 Suggest Strong Password")
-        suggest_btn.setStyleSheet("background-color: #0275d8; color: white; border-radius: 5px; padding: 6px;")
         suggest_btn.clicked.connect(self.suggest_password)
+        suggest_btn.setStyleSheet("background-color: #0275d8; color: white; border-radius: 5px; padding: 6px;")
 
-        # Progress bar (for setup process)
+        confirm_btn = QPushButton("✅ Set Master Password")
+        confirm_btn.clicked.connect(self.handle_setup)
+        confirm_btn.setStyleSheet("background-color: #28a745; color: white; border-radius: 6px; padding: 8px;")
+
         self.progress = QProgressBar()
         self.progress.setVisible(False)
 
-        # Confirm button
-        confirm_btn = QPushButton("✅ Set Master Password")
-        confirm_btn.setStyleSheet("background-color: #28a745; color: white; border-radius: 6px; padding: 8px;")
-        confirm_btn.clicked.connect(self.handle_setup)
-
-        # Layout
         top_layout = QHBoxLayout()
         top_layout.addWidget(self.password_input)
         top_layout.addWidget(toggle_btn)
@@ -88,60 +133,60 @@ class ConfigWindow(QWidget):
 
         self.setLayout(layout)
 
-    # --- Button Handlers ---
+    # ----------- Event handlers -----------
 
     def toggle_password_visibility(self, checked):
-        """Show/hide password fields."""
-        if checked:
-            self.password_input.setEchoMode(QLineEdit.EchoMode.Normal)
-            self.confirm_input.setEchoMode(QLineEdit.EchoMode.Normal)
-        else:
-            self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
-            self.confirm_input.setEchoMode(QLineEdit.EchoMode.Password)
+        mode = QLineEdit.EchoMode.Normal if checked else QLineEdit.EchoMode.Password
+        self.password_input.setEchoMode(mode)
+        self.confirm_input.setEchoMode(mode)
 
     def suggest_password(self):
-        """Generate a strong random password and display it."""
         suggested = generate_strong_password()
         self.password_input.setText(suggested)
         self.confirm_input.setText(suggested)
         QMessageBox.information(self, "Suggested Password", "A strong password has been auto-filled for you!")
 
     def handle_setup(self):
-        """Run full DB setup and store master password."""
         password = self.password_input.text().strip()
         confirm = self.confirm_input.text().strip()
 
         if not password or not confirm:
-            QMessageBox.warning(self, "Error", "Please fill in both password fields.")
+            QMessageBox.warning(self, "Error", "Please fill in both fields.")
             return
 
         if password != confirm:
             QMessageBox.warning(self, "Error", "Passwords do not match.")
             return
 
+        if len(password) < 8:
+            QMessageBox.warning(self, "Weak Password", "Password should be at least 8 characters long.")
+            return
+
         self.progress.setVisible(True)
-        self.progress.setValue(10)
+        self.progress.setValue(20)
 
-        # Step 1: Initialize databases
-        threading.Thread(target=self.run_setup, args=(password,)).start()
+        # Launch worker in a thread
+        self.worker = SetupWorker(password)
+        self.worker_thread = threading.Thread(target=self.worker.run, daemon=True)
+        self.worker.finished.connect(self.on_setup_finished)
+        self.worker_thread.start()
 
-    def run_setup(self, password):
-        """Run setup in background thread."""
-        try:
-            self.progress.setValue(40)
-            setup()  # initialize databases
-            self.progress.setValue(70)
-            setup_master_password(password)  # store master password securely
-            self.progress.setValue(100)
+    def on_setup_finished(self, success, message):
+        self.progress.setVisible(False)
+        if success:
+            QMessageBox.information(self, "Success", message)
+            QTimer.singleShot(800, self.open_login_window)
+        else:
+            QMessageBox.critical(self, "Setup Failed", message)
 
-            QMessageBox.information(self, "Success", "Master password configured successfully!")
-            self.close()
+    def open_login_window(self):
+        """Open login window after setup."""
+        self.hide()
+        self.login = LoginWindow()
+        self.login.show()
 
-        except Exception as e:
-            QMessageBox.critical(self, "Setup Failed", f"Error: {str(e)}")
-        finally:
-            self.progress.setVisible(False)
 
+# ---------------- Entry Point ----------------
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
