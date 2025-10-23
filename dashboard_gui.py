@@ -29,9 +29,14 @@ class DashboardWindow(QWidget):
         self.setGeometry(450, 200, 900, 500)
         self.setStyleSheet("background-color: #101820; color: #E0E0E0;")
 
+        self.clipboard_timer = None  # Track active clipboard timer
+
         self.init_ui()
         self.load_entries()
 
+    # ------------------------------------------------------
+    # UI Layout
+    # ------------------------------------------------------
     def init_ui(self):
         layout = QVBoxLayout()
 
@@ -53,15 +58,21 @@ class DashboardWindow(QWidget):
         add_btn = QPushButton("➕ Add Entry")
         add_btn.clicked.connect(self.open_add_entry_dialog)
 
+        clear_clipboard_btn = QPushButton("🧹 Clear Clipboard")
+        clear_clipboard_btn.clicked.connect(self.clear_clipboard_manual)
+
         logout_btn = QPushButton("🚪 Logout")
         logout_btn.clicked.connect(self.close)
 
-        for btn in (refresh_btn, add_btn, logout_btn):
-            btn.setStyleSheet("background-color: #0275d8; color: white; border-radius: 5px; padding: 6px;")
+        for btn in (refresh_btn, add_btn, clear_clipboard_btn, logout_btn):
+            btn.setStyleSheet(
+                "background-color: #0275d8; color: white; border-radius: 5px; padding: 6px;"
+            )
 
         search_layout.addWidget(self.search_input)
         search_layout.addWidget(refresh_btn)
         search_layout.addWidget(add_btn)
+        search_layout.addWidget(clear_clipboard_btn)
         search_layout.addWidget(logout_btn)
 
         layout.addLayout(search_layout)
@@ -75,8 +86,9 @@ class DashboardWindow(QWidget):
 
         self.setLayout(layout)
 
-    # --- Database Operations ---
-
+    # ------------------------------------------------------
+    # Database Operations
+    # ------------------------------------------------------
     def db_connect(self):
         """Connect to pm_data database."""
         return mysql.connector.connect(
@@ -105,15 +117,21 @@ class DashboardWindow(QWidget):
                     item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                     self.table.setItem(row_idx, col_idx, item)
 
-                # Add double-click action for password reveal/copy
-                self.table.cellDoubleClicked.connect(self.handle_password_action)
+            # Ensure the double-click signal is connected once (safe disconnect)
+            try:
+             self.table.cellDoubleClicked.disconnect()
+            except TypeError:
+              pass  # no previous connection
 
-            cur.close()
-            db.close()
+            self.table.cellDoubleClicked.connect(self.handle_password_action)
+
 
         except Exception as e:
             QMessageBox.critical(self, "Database Error", str(e))
 
+    # ------------------------------------------------------
+    # Search Filter
+    # ------------------------------------------------------
     def search_entries(self):
         """Filter entries by site name."""
         query = self.search_input.text().strip().lower()
@@ -121,8 +139,9 @@ class DashboardWindow(QWidget):
             item = self.table.item(row, 1)  # Site name column
             self.table.setRowHidden(row, query not in item.text().lower())
 
-    # --- Password Reveal / Clipboard Copy ---
-
+    # ------------------------------------------------------
+    # Password Reveal / Clipboard Copy
+    # ------------------------------------------------------
     def handle_password_action(self, row, col):
         """Decrypt password on double-click of password cell."""
         if col != 5:
@@ -140,17 +159,39 @@ class DashboardWindow(QWidget):
             decrypted = decrypt_password(self.master_key, enc_value)
 
             pyperclip.copy(decrypted)
-            QMessageBox.information(self, "Copied", "Password copied to clipboard. It will be cleared in 20 seconds.")
+            QMessageBox.information(
+                self,
+                "Copied",
+                "Password copied to clipboard.\nIt will clear automatically in 20 seconds.",
+            )
 
             # Clear clipboard after 20 seconds
-            timer = threading.Timer(20.0, lambda: pyperclip.copy(""))
-            timer.start()
+            if self.clipboard_timer:
+                self.clipboard_timer.cancel()
+            self.clipboard_timer = threading.Timer(20.0, self.clear_clipboard_silent)
+            self.clipboard_timer.start()
 
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Could not decrypt password: {e}")
 
-    # --- Add Entry Dialog ---
+    def clear_clipboard_silent(self):
+        """Silently clear clipboard (after 20s timer)."""
+        try:
+            pyperclip.copy("")
+        except Exception:
+            pass  # Silent fail if clipboard not available
 
+    def clear_clipboard_manual(self):
+        """Instantly clear clipboard when user clicks 'Clear Clipboard'."""
+        if self.clipboard_timer:
+            self.clipboard_timer.cancel()
+            self.clipboard_timer = None
+        pyperclip.copy("")
+        QMessageBox.information(self, "Clipboard Cleared", "Clipboard contents have been cleared.")
+
+    # ------------------------------------------------------
+    # Add Entry Dialog
+    # ------------------------------------------------------
     def open_add_entry_dialog(self):
         dialog = QDialog(self)
         dialog.setWindowTitle("Add New Entry")
@@ -209,7 +250,9 @@ class DashboardWindow(QWidget):
             QMessageBox.critical(dialog, "Error", f"Could not save entry: {e}")
 
 
-# --- Entry Point for Standalone Testing ---
+# ------------------------------------------------------
+# Entry Point for Standalone Testing
+# ------------------------------------------------------
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     from utils.crypto_utils import computeMasterKey

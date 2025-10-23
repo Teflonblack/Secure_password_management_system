@@ -1,100 +1,147 @@
 # utils/setup_utils.py
+# ------------------------------------------------------
+# Handles all setup tasks:
+#  - Creates databases: pm_auth and pm_data
+#  - Creates tables (with ID primary keys)
+#  - Stores hashed master password + device secret
+# ------------------------------------------------------
+
 import hashlib
 import string
 import random
-import sys
+import mysql.connector
 from mysql.connector import Error
-from rich import print as printc
 from rich.console import Console
-
-from utils.dbconfig import dbconfig
 
 console = Console()
 
 
 def generateDeviceSecret(length=10):
     """Generate a random uppercase alphanumeric device secret."""
+    import string, random
     return "".join(random.choices(string.ascii_uppercase + string.digits, k=length))
 
 
-def setup_master_password(master_password: str) -> bool:
-    """
-    Creates two databases (pm_auth and pm_data), 
-    initializes tables, and stores hashed master password + device secret.
-    Returns True if successful, False otherwise.
-    """
+# ------------------------------------------------------
+# DATABASE CREATION
+# ------------------------------------------------------
 
-    # 1️⃣ Connect to MySQL without specifying database
-    db_root = dbconfig()
-    if db_root is None:
-        printc("[red]❌ Failed to connect to MySQL.[/red]")
-        return False
-    cursor = db_root.cursor()
-
+def create_database(cursor, db_name: str):
+    """Create a database if it doesn't exist."""
     try:
-        # 2️⃣ Create the two databases
-        cursor.execute("CREATE DATABASE IF NOT EXISTS pm_auth")
-        cursor.execute("CREATE DATABASE IF NOT EXISTS pm_data")
-        printc("[green][+][/green] Databases 'pm_auth' and 'pm_data' created or already exist")
-    except Error:
-        console.print_exception(show_locals=True)
-        return False
+        cursor.execute(f"CREATE DATABASE IF NOT EXISTS {db_name}")
+        console.print(f"[green][+][/green] Database '{db_name}' verified/created.")
+    except Error as e:
+        console.print(f"[red][-][/red] Failed to create database {db_name}: {e}")
 
-    # 3️⃣ Connect to each one
-    db_auth = dbconfig(database="pm_auth")
-    db_data = dbconfig(database="pm_data")
-    if db_auth is None or db_data is None:
-        printc("[red]❌ Could not connect to one or both databases.[/red]")
-        return False
 
-    cur_auth = db_auth.cursor()
-    cur_data = db_data.cursor()
-
-    # 4️⃣ Create tables
-    cur_auth.execute("""
+def create_auth_table(cursor):
+    """Create table for storing master password and device secret."""
+    cursor.execute("""
         CREATE TABLE IF NOT EXISTS secrets (
-            masterkey_hash TEXT NOT NULL,
-            device_secret TEXT NOT NULL
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            masterkey_hash VARCHAR(128) NOT NULL,
+            device_secret VARCHAR(128) NOT NULL
         )
     """)
-    printc("[green][+][/green] Table 'secrets' created in pm_auth")
+    console.print("[green][+][/green] 'secrets' table verified/created in pm_auth.")
 
-    cur_data.execute("""
+
+def create_entries_table(cursor):
+    """Create table for password entries (with id primary key)."""
+    cursor.execute("""
         CREATE TABLE IF NOT EXISTS pm_entries (
-            sitename TEXT NOT NULL,
-            siteurl TEXT NOT NULL,
-            email TEXT,
-            username TEXT,
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            sitename VARCHAR(100) NOT NULL,
+            siteurl VARCHAR(200) NOT NULL,
+            email VARCHAR(150),
+            username VARCHAR(150),
             password TEXT NOT NULL
         )
     """)
-    printc("[green][+][/green] Table 'pm_entries' created in pm_data")
-
-    # 5️⃣ Generate and store secrets
-    hashed_mp = hashlib.sha256(master_password.encode()).hexdigest()
-    device_secret = generateDeviceSecret()
-
-    # Clear any existing entries in secrets
-    cur_auth.execute("DELETE FROM secrets")
-
-    insert_query = "INSERT INTO secrets (masterkey_hash, device_secret) VALUES (%s, %s)"
-    cur_auth.execute(insert_query, (hashed_mp, device_secret))
-    db_auth.commit()
-
-    printc("[bold green]✓ Master password and device secret stored successfully![/bold green]")
-
-    # 6️⃣ Cleanup
-    db_root.close()
-    db_auth.close()
-    db_data.close()
-    return True
+    console.print("[green][+][/green] 'pm_entries' table verified/created in pm_data.")
 
 
-# Optional CLI test
+def setup():
+    """Initialize both databases and tables."""
+    try:
+        db = mysql.connector.connect(
+            host="localhost",
+            user="pm",
+            password="password"
+        )
+
+        cursor = db.cursor()
+
+        # Create databases
+        create_database(cursor, "pm_auth")
+        create_database(cursor, "pm_data")
+
+        # Create tables in each database
+        cursor.execute("USE pm_auth")
+        create_auth_table(cursor)
+
+        cursor.execute("USE pm_data")
+        create_entries_table(cursor)
+
+        console.print("[bold green]✓ Database structure ready.[/bold green]")
+
+    except Error as e:
+        console.print_exception(show_locals=True)
+    finally:
+        if db.is_connected():
+            cursor.close()
+            db.close()
+
+
+# ------------------------------------------------------
+# MASTER PASSWORD STORAGE
+# ------------------------------------------------------
+
+def setup_master_password(master_password: str) -> bool:
+    """
+    Stores hashed master password + generated device secret in pm_auth.secrets.
+    Returns True if successful, False otherwise.
+    """
+    try:
+        db_auth = mysql.connector.connect(
+            host="localhost",
+            user="pm",
+            password="password",
+            database="pm_auth"
+        )
+
+        cur = db_auth.cursor()
+
+        # Hash the master password
+        hashed_mp = hashlib.sha256(master_password.encode()).hexdigest()
+        device_secret = generateDeviceSecret()
+
+        # Remove old secret (only one master should exist)
+        cur.execute("DELETE FROM secrets")
+
+        # Insert new one
+        insert_query = "INSERT INTO secrets (masterkey_hash, device_secret) VALUES (%s, %s)"
+        cur.execute(insert_query, (hashed_mp, device_secret))
+        db_auth.commit()
+
+        console.print("[bold green]✓ Master password stored successfully in pm_auth[/bold green]")
+        return True
+
+    except Error as e:
+        console.print(f"[red]Error saving master password: {e}[/red]")
+        return False
+
+    finally:
+        if db_auth.is_connected():
+            cur.close()
+            db_auth.close()
+
+
+# ------------------------------------------------------
+# CLI TEST
+# ------------------------------------------------------
 if __name__ == "__main__":
-    import getpass
-    mp = getpass.getpass("Enter MASTER PASSWORD: ")
-    if mp == getpass.getpass("Confirm MASTER PASSWORD: "):
-        setup_master_password(mp)
-    else:
-        print("Passwords do not match.")
+    setup()
+    mp = input("Enter MASTER PASSWORD: ").strip()
+    setup_master_password(mp)
