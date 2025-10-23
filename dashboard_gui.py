@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import (
     QLineEdit, QTableWidget, QTableWidgetItem, QHeaderView, QDialog,
     QMessageBox, QFormLayout
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont
 
 from utils.crypto_utils import computeMasterKey, encrypt_password, decrypt_password
@@ -48,7 +48,7 @@ class DashboardWindow(QWidget):
         self.search_input.textChanged.connect(self.search_entries)
 
         refresh_btn = QPushButton("🔁 Refresh")
-        refresh_btn.clicked.connect(self.load_entries)
+        refresh_btn.clicked.connect(self.refresh_entries)
 
         add_btn = QPushButton("➕ Add Entry")
         add_btn.clicked.connect(self.open_add_entry_dialog)
@@ -111,13 +111,12 @@ class DashboardWindow(QWidget):
             cur.execute("SELECT * FROM pm_entries")
             rows = cur.fetchall()
 
+            self.table.clearContents()
             self.table.setRowCount(len(rows))
+
             for row_idx, row in enumerate(rows):
                 for col_idx, value in enumerate(row):
-                    if col_idx == 5:  # Password column
-                        display_value = "••••••••"
-                    else:
-                        display_value = str(value) if value else ""
+                    display_value = "••••••••" if col_idx == 5 else str(value or "")
                     item = QTableWidgetItem(display_value)
                     item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                     self.table.setItem(row_idx, col_idx, item)
@@ -127,6 +126,11 @@ class DashboardWindow(QWidget):
 
         except Exception as e:
             QMessageBox.critical(self, "Database Error", str(e))
+
+    def refresh_entries(self):
+        """Reload data with a confirmation message."""
+        self.load_entries()
+        QTimer.singleShot(100, lambda: QMessageBox.information(self, "Refreshed", "✅ Entries reloaded successfully!"))
 
     def search_entries(self):
         """Filter entries by site name."""
