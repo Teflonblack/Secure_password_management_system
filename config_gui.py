@@ -1,10 +1,11 @@
-# config_gui.py (stable version with Qt signals)
+# config_gui.py (updated with strong password policy)
 import sys
 import string
 import random
 import threading
 import hashlib
 import mysql.connector
+import re
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
@@ -54,6 +55,21 @@ def setup_master_password(password):
         db.close()
     except Exception as e:
         raise RuntimeError(str(e))
+
+
+def is_strong_password(password: str) -> bool:
+    """Validate password strength."""
+    if len(password) < 8:
+        return False
+    if not re.search(r"[A-Z]", password):  # At least one uppercase
+        return False
+    if not re.search(r"[a-z]", password):  # At least one lowercase
+        return False
+    if not re.search(r"\d", password):  # At least one number
+        return False
+    if not re.search(r"[!@#$%^&*(),.?\":{}|<>]", password):  # At least one special char
+        return False
+    return True
 
 
 # ---------------- Worker with signals ----------------
@@ -158,8 +174,12 @@ class ConfigWindow(QWidget):
             QMessageBox.warning(self, "Error", "Passwords do not match.")
             return
 
-        if len(password) < 8:
-            QMessageBox.warning(self, "Weak Password", "Password should be at least 8 characters long.")
+        if not is_strong_password(password):
+            QMessageBox.warning(
+                self,
+                "Weak Password",
+                "Password must have:\n• At least 8 characters\n• One uppercase letter\n• One lowercase letter\n• One number\n• One special symbol"
+            )
             return
 
         self.progress.setVisible(True)
