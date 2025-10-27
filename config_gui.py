@@ -1,16 +1,21 @@
-# config_gui.py (updated with strong password policy)
+# config_gui.py (Final Enhanced Secure Version)
+# -------------------------------------------------------
+# GUI for setting up the master password and initializing
+# the Secure Password Manager databases.
+# -------------------------------------------------------
+
 import sys
 import string
 import random
 import threading
+import re
 import hashlib
 import mysql.connector
-import re
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QLabel, QLineEdit, QPushButton,
-    QVBoxLayout, QHBoxLayout, QMessageBox, QProgressBar
+    QVBoxLayout, QHBoxLayout, QMessageBox, QProgressBar, QCheckBox
 )
 
 from utils.setup_utils import setup
@@ -57,21 +62,6 @@ def setup_master_password(password):
         raise RuntimeError(str(e))
 
 
-def is_strong_password(password: str) -> bool:
-    """Validate password strength."""
-    if len(password) < 8:
-        return False
-    if not re.search(r"[A-Z]", password):  # At least one uppercase
-        return False
-    if not re.search(r"[a-z]", password):  # At least one lowercase
-        return False
-    if not re.search(r"\d", password):  # At least one number
-        return False
-    if not re.search(r"[!@#$%^&*(),.?\":{}|<>]", password):  # At least one special char
-        return False
-    return True
-
-
 # ---------------- Worker with signals ----------------
 
 class SetupWorker(QObject):
@@ -97,7 +87,7 @@ class ConfigWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Secure Password Manager - Setup")
-        self.setGeometry(500, 250, 450, 350)
+        self.setGeometry(500, 250, 450, 440)
         self.setStyleSheet("background-color: #101820; color: #E0E0E0;")
         self.init_ui()
 
@@ -111,10 +101,12 @@ class ConfigWindow(QWidget):
         self.password_input = QLineEdit()
         self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.password_input.setPlaceholderText("Enter master password")
+        self.password_input.textChanged.connect(self.on_password_change)
 
         self.confirm_input = QLineEdit()
         self.confirm_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.confirm_input.setPlaceholderText("Confirm master password")
+        self.confirm_input.textChanged.connect(self.check_password_match)
 
         toggle_btn = QPushButton("👁️ Show")
         toggle_btn.setCheckable(True)
@@ -132,6 +124,28 @@ class ConfigWindow(QWidget):
         self.progress = QProgressBar()
         self.progress.setVisible(False)
 
+        # --- Password strength bar + label ---
+        self.strength_bar = QProgressBar()
+        self.strength_bar.setRange(0, 5)
+        self.strength_bar.setTextVisible(False)
+        self.strength_bar.setFixedHeight(10)
+
+        self.strength_label = QLabel("Strength: ")
+        self.strength_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self.strength_label.setStyleSheet("color: #AAAAAA; font-size: 12px;")
+
+        # --- Requirement checkboxes ---
+        self.check_length = QCheckBox("At least 8 characters")
+        self.check_upper = QCheckBox("Contains uppercase letter")
+        self.check_lower = QCheckBox("Contains lowercase letter")
+        self.check_number = QCheckBox("Contains number")
+        self.check_symbol = QCheckBox("Contains special symbol")
+
+        for chk in [self.check_length, self.check_upper, self.check_lower, self.check_number, self.check_symbol]:
+            chk.setEnabled(False)
+            chk.setStyleSheet("color: #AAA;")
+
+        # --- Layout building ---
         top_layout = QHBoxLayout()
         top_layout.addWidget(self.password_input)
         top_layout.addWidget(toggle_btn)
@@ -140,6 +154,17 @@ class ConfigWindow(QWidget):
         layout.addSpacing(20)
         layout.addLayout(top_layout)
         layout.addWidget(self.confirm_input)
+
+        layout.addWidget(self.strength_bar)
+        layout.addWidget(self.strength_label)
+        layout.addSpacing(10)
+
+        layout.addWidget(self.check_length)
+        layout.addWidget(self.check_upper)
+        layout.addWidget(self.check_lower)
+        layout.addWidget(self.check_number)
+        layout.addWidget(self.check_symbol)
+
         layout.addSpacing(10)
         layout.addWidget(suggest_btn)
         layout.addSpacing(10)
@@ -148,8 +173,62 @@ class ConfigWindow(QWidget):
         layout.addWidget(self.progress)
 
         self.setLayout(layout)
+        self.update_strength_ui("")
 
-    # ----------- Event handlers -----------
+    # ----------- Password validation -----------
+
+    def on_password_change(self, text):
+        self.update_strength_ui(text)
+        self.check_password_match()
+
+    def update_strength_ui(self, password):
+        length_ok = len(password) >= 8
+        upper_ok = bool(re.search(r"[A-Z]", password))
+        lower_ok = bool(re.search(r"[a-z]", password))
+        num_ok = bool(re.search(r"[0-9]", password))
+        sym_ok = bool(re.search(r"[^A-Za-z0-9]", password))
+
+        # Update checkbox states
+        self.check_length.setChecked(length_ok)
+        self.check_upper.setChecked(upper_ok)
+        self.check_lower.setChecked(lower_ok)
+        self.check_number.setChecked(num_ok)
+        self.check_symbol.setChecked(sym_ok)
+
+        checks = sum([length_ok, upper_ok, lower_ok, num_ok, sym_ok])
+        self.strength_bar.setValue(checks)
+
+        # Strength label
+        if checks <= 2:
+            text = "Weak"
+            color = "#d9534f"
+        elif checks == 3:
+            text = "Fair"
+            color = "#f0ad4e"
+        elif checks == 4:
+            text = "Strong"
+            color = "#5bc0de"
+        else:
+            text = "Very Strong"
+            color = "#5cb85c"
+
+        self.strength_label.setText(f"Strength: <b><span style='color:{color}'>{text}</span></b>")
+
+    def check_password_match(self):
+        """Update confirm field border color depending on match."""
+        pwd = self.password_input.text()
+        confirm = self.confirm_input.text()
+
+        if not confirm:
+            self.confirm_input.setStyleSheet("border: 1px solid #444; color: white;")
+            return
+
+        if pwd == confirm:
+            self.confirm_input.setStyleSheet("border: 2px solid #28a745; color: white;")
+        else:
+            self.confirm_input.setStyleSheet("border: 2px solid #d9534f; color: white;")
+
+    # ----------- Button Handlers -----------
 
     def toggle_password_visibility(self, checked):
         mode = QLineEdit.EchoMode.Normal if checked else QLineEdit.EchoMode.Password
@@ -174,12 +253,15 @@ class ConfigWindow(QWidget):
             QMessageBox.warning(self, "Error", "Passwords do not match.")
             return
 
-        if not is_strong_password(password):
-            QMessageBox.warning(
-                self,
-                "Weak Password",
-                "Password must have:\n• At least 8 characters\n• One uppercase letter\n• One lowercase letter\n• One number\n• One special symbol"
-            )
+        # Validate strong password
+        if not all([
+            len(password) >= 8,
+            re.search(r"[A-Z]", password),
+            re.search(r"[a-z]", password),
+            re.search(r"[0-9]", password),
+            re.search(r"[^A-Za-z0-9]", password),
+        ]):
+            QMessageBox.warning(self, "Weak Password", "Password does not meet all security requirements.")
             return
 
         self.progress.setVisible(True)
