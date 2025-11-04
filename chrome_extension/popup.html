@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Secure Password Manager</title>
+  <style>
+    body {
+      font-family: "Segoe UI", sans-serif;
+      background-color: #0d1117;
+      color: #e6edf3;
+      width: 340px;
+      margin: 0;
+      padding: 16px;
+      box-sizing: border-box;
+    }
+
+    h3 {
+      text-align: center;
+      color: #00bcd4;
+      margin-bottom: 10px;
+    }
+
+    input, button {
+      width: 100%;
+      margin: 6px 0;
+      padding: 8px;
+      border-radius: 6px;
+      border: none;
+      font-size: 14px;
+      box-sizing: border-box;
+    }
+
+    input {
+      background-color: #161b22;
+      color: #e6edf3;
+    }
+
+    button {
+      background-color: #238636;
+      color: white;
+      font-weight: 500;
+      cursor: pointer;
+      transition: 0.25s;
+    }
+
+    button:hover {
+      background-color: #2ea043;
+    }
+
+    hr {
+      border: 0;
+      border-top: 1px solid #30363d;
+      margin: 14px 0;
+    }
+
+    .section {
+      background-color: #161b22;
+      border-radius: 10px;
+      padding: 10px;
+      margin-bottom: 12px;
+    }
+
+    .entry {
+      background-color: #21262d;
+      padding: 10px;
+      border-radius: 6px;
+      margin-bottom: 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .entry button {
+      width: auto;
+      padding: 4px 8px;
+      margin-top: 4px;
+      font-size: 12px;
+      background-color: #30363d;
+    }
+
+    .entry button:hover {
+      background-color: #444c56;
+    }
+
+    #unlockStatus {
+      text-align: center;
+      font-size: 13px;
+      margin-top: 6px;
+      color: #ff7b72;
+    }
+
+    #unlockStatus.unlocked {
+      color: #00ff9c;
+    }
+
+    .hidden {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <h3>🔐 Secure Password Manager</h3>
+
+  <!-- Unlock Vault Section -->
+  <div class="section" id="unlockSection">
+    <input type="password" id="masterPassword" placeholder="Enter Master Password">
+    <button id="unlockVaultBtn">🔓 Unlock Vault</button>
+    <div id="unlockStatus">Vault Locked 🔒</div>
+  </div>
+
+  <!-- Password Fetch Section -->
+  <div class="section">
+    <button id="fetchPasswordsBtn">🔍 Get Password for This Site</button>
+    <div id="passwordList"></div>
+  </div>
+
+  <!-- Save Password Section -->
+  <div class="section">
+    <h4>💾 Save New Password</h4>
+    <input type="text" id="username" placeholder="Username">
+    <input type="password" id="password" placeholder="Password">
+    <button id="savePasswordBtn">Save Password</button>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

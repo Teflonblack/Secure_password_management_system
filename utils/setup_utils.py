@@ -7,8 +7,8 @@
 # ------------------------------------------------------
 
 import hashlib
-import string
 import random
+import string
 import mysql.connector
 from mysql.connector import Error
 from rich.console import Console
@@ -16,16 +16,18 @@ from rich.console import Console
 console = Console()
 
 
-def generateDeviceSecret(length=10):
-    """Generate a random uppercase alphanumeric device secret."""
-    import string, random
-    return "".join(random.choices(string.ascii_uppercase + string.digits, k=length))
+# ------------------------------------------------------
+# DEVICE SECRET GENERATION
+# ------------------------------------------------------
+def generateDeviceSecret(length=32) -> str:
+    """Generate a high-entropy random alphanumeric + symbol device secret."""
+    chars = string.ascii_letters + string.digits + "!@#$%^&*()-_=+[]{}"
+    return "".join(random.SystemRandom().choice(chars) for _ in range(length))
 
 
 # ------------------------------------------------------
 # DATABASE CREATION
 # ------------------------------------------------------
-
 def create_database(cursor, db_name: str):
     """Create a database if it doesn't exist."""
     try:
@@ -70,23 +72,25 @@ def setup():
             user="pm",
             password="password"
         )
-
         cursor = db.cursor()
 
         # Create databases
         create_database(cursor, "pm_auth")
         create_database(cursor, "pm_data")
+        db.commit()
 
-        # Create tables in each database
+        # Create tables in pm_auth
         cursor.execute("USE pm_auth")
         create_auth_table(cursor)
 
+        # Create tables in pm_data
         cursor.execute("USE pm_data")
         create_entries_table(cursor)
+        db.commit()
 
         console.print("[bold green]✓ Database structure ready.[/bold green]")
 
-    except Error as e:
+    except Error:
         console.print_exception(show_locals=True)
     finally:
         if db.is_connected():
@@ -97,7 +101,6 @@ def setup():
 # ------------------------------------------------------
 # MASTER PASSWORD STORAGE
 # ------------------------------------------------------
-
 def setup_master_password(master_password: str) -> bool:
     """
     Stores hashed master password + generated device secret in pm_auth.secrets.
@@ -110,22 +113,21 @@ def setup_master_password(master_password: str) -> bool:
             password="password",
             database="pm_auth"
         )
-
         cur = db_auth.cursor()
 
-        # Hash the master password
         hashed_mp = hashlib.sha256(master_password.encode()).hexdigest()
         device_secret = generateDeviceSecret()
 
-        # Remove old secret (only one master should exist)
+        # Ensure only one master password/device_secret exists
         cur.execute("DELETE FROM secrets")
 
-        # Insert new one
-        insert_query = "INSERT INTO secrets (masterkey_hash, device_secret) VALUES (%s, %s)"
-        cur.execute(insert_query, (hashed_mp, device_secret))
+        cur.execute(
+            "INSERT INTO secrets (masterkey_hash, device_secret) VALUES (%s, %s)",
+            (hashed_mp, device_secret)
+        )
         db_auth.commit()
 
-        console.print("[bold green]✓ Master password stored successfully in pm_auth[/bold green]")
+        console.print("[bold green]✓ Master password and device secret stored successfully[/bold green]")
         return True
 
     except Error as e:

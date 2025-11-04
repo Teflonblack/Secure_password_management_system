@@ -1,0 +1,7 @@
+Windows Registry Editor Version 5.00
+
+[HKEY_CURRENT_USER\Software\Google\Chrome\NativeMessagingHosts\com.securepm.nativehost]
+@="C:\\Users\\Gregory\\Desktop\\Secure_password_management_system\\browser_host_manifest.json"
+
+[HKEY_CURRENT_USER\Software\Microsoft\Edge\NativeMessagingHosts\com.securepm.nativehost]
+@="C:\\Users\\Gregory\\Desktop\\Secure_password_management_system\\browser_host_manifest.json"
